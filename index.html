@@ -69,6 +69,56 @@
 </head>
 <body class="bg-gray-50">
   <div id="root"></div>
-  <script type="module">import '@/index';</script>
+  <script type="module">
+    // === CABIN 本物ログインの門（Supabase Auth） ===
+    // 本物のログインに成功した人だけアプリ本体(@/index)を読み込む。
+    // 同じ supabase クライアント(@/supabaseClient)を使うので、ログイン後の通信はすべて認証済み＝RLSを通過する。
+    import { supabase } from '@/supabaseClient';
+
+    function showLogin(message) {
+      var rootEl = document.getElementById('root');
+      if (rootEl) rootEl.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#f9fafb;font-family:system-ui,sans-serif;z-index:99999';
+      wrap.innerHTML =
+        '<form id="cabin-login" style="background:#fff;padding:28px 24px;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.12);width:320px;max-width:90vw">' +
+          '<div style="font-size:20px;font-weight:700;margin-bottom:4px">CABIN ログイン</div>' +
+          '<div style="font-size:12px;color:#6b7280;margin-bottom:16px">部署の共通アカウントでログインしてください</div>' +
+          '<input id="cabin-email" type="email" placeholder="メールアドレス" autocomplete="username" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #d1d5db;border-radius:8px;margin-bottom:10px;font-size:14px">' +
+          '<input id="cabin-pass" type="password" placeholder="パスワード" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #d1d5db;border-radius:8px;margin-bottom:12px;font-size:14px">' +
+          '<button type="submit" style="width:100%;padding:11px;background:#16a34a;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer">ログイン</button>' +
+          '<div id="cabin-err" style="color:#dc2626;font-size:12px;margin-top:10px;min-height:16px"></div>' +
+        '</form>';
+      document.body.appendChild(wrap);
+      var errEl = wrap.querySelector('#cabin-err');
+      if (message) errEl.textContent = message;
+      wrap.querySelector('#cabin-login').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var btn = wrap.querySelector('button');
+        btn.disabled = true; btn.textContent = '確認中...';
+        errEl.textContent = '';
+        var email = wrap.querySelector('#cabin-email').value.trim();
+        var password = wrap.querySelector('#cabin-pass').value;
+        var res = await supabase.auth.signInWithPassword({ email: email, password: password });
+        if (res.error) {
+          errEl.textContent = 'ログインに失敗しました（メール／パスワードをご確認ください）';
+          btn.disabled = false; btn.textContent = 'ログイン';
+          return;
+        }
+        location.reload();
+      });
+    }
+
+    try {
+      var s = await supabase.auth.getSession();
+      if (s && s.data && s.data.session) {
+        await import('@/index');   // ログイン済み → アプリ本体を起動
+      } else {
+        showLogin('');             // 未ログイン → ログイン画面
+      }
+    } catch (err) {
+      showLogin('接続エラーが発生しました。時間をおいて再読み込みしてください。');
+    }
+  </script>
 </body>
 </html>
