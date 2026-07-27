@@ -1,0 +1,495 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>技術開発ポータル</title>
+<!--
+  技術開発ポータル（CABIN 同居ページ）
+  ------------------------------------------------------------------
+  ・データは Supabase(rd_nexus_store) から読むだけ。書き込みはしない。
+  ・CABIN 本体(index.html)と同じオリジンに置くので、CABINのログインセッション
+    (localStorage の sb-<ref>-auth-token)をそのまま使う＝二重ログイン不要。
+    未ログインのときだけ、このページ単体のログインフォームを出す。
+  ・themes / kintone_feed は cabin-sync/sync.mjs が kintone(実験日報)から自動更新する。
+  ・このHTMLには社内URL・実データ・パスワードを一切書かない（公開URLに置くため）。
+    kintoneへのリンクは kintone_feed の中（＝ログインの内側）から受け取る。
+-->
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --ink:#1e293b; --muted:#64748b;
+    --line:#e2e8f0; --brand:#1e5eb8; --brand-soft:#e8f0fb;
+    --shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.05);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Meiryo","Yu Gothic UI","Segoe UI",system-ui,sans-serif;
+    font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 22px 60px}
+
+  /* ---- ヘッダ ---- */
+  .top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .logo{width:38px;height:38px;border-radius:10px;background:var(--brand);
+    display:grid;place-items:center;color:#fff;font-weight:700;font-size:18px}
+  h1{font-size:20px;margin:0;letter-spacing:.02em}
+  .sub{color:var(--muted);font-size:12.5px;margin-top:1px}
+  .topbtns{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .btn{background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 13px;
+    font-size:12.5px;font-weight:600;color:#334155;cursor:pointer;box-shadow:var(--shadow);
+    font-family:inherit}
+  .btn:hover{border-color:var(--brand);color:var(--brand)}
+  .btn[disabled]{opacity:.55;cursor:default}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+  /* ---- 検索 ---- */
+  .searchbar{margin:16px 0 22px;position:relative}
+  .searchbar input{width:100%;padding:14px 16px 14px 44px;border:1px solid var(--line);
+    border-radius:12px;font-size:15px;background:#fff;box-shadow:var(--shadow);outline:none;
+    font-family:inherit}
+  .searchbar input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  .searchbar svg{position:absolute;left:15px;top:14px;color:var(--muted)}
+  .searchhint{color:var(--muted);font-size:11.5px;margin-top:6px;padding-left:2px}
+
+  /* ---- KPI 帯 ---- */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;box-shadow:var(--shadow)}
+  .kpi .n{font-size:24px;font-weight:700;letter-spacing:.02em}
+  .kpi .n small{font-size:14px;font-weight:600}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:2px}
+  .kpi .d{font-size:11.5px;margin-top:6px;font-weight:600}
+  .up{color:#15803d}.down{color:#b91c1c}.flat{color:var(--muted)}
+
+  /* ---- レイアウト ---- */
+  .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+  section h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  section h2 .count{color:var(--muted);font-weight:400;font-size:12px}
+  .seebtn{margin-left:auto;font-size:12px;color:var(--brand);font-weight:600;cursor:pointer}
+
+  /* ---- 新着日報カード ---- */
+  .feed{display:flex;flex-direction:column;gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:13px 15px;box-shadow:var(--shadow);border-left:4px solid var(--tc,#cbd5e1);display:block}
+  a.card:hover{border-color:var(--brand)}
+  .card .r1{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+  .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;
+    color:var(--tc,#475569);background:var(--tcs,#f1f5f9)}
+  .card .date{color:var(--muted);font-size:11.5px;margin-left:auto}
+  .card .ttl{font-weight:700;font-size:14px}
+  .card .sm{color:#475569;font-size:12.5px;margin-top:2px}
+  .card .who{color:var(--muted);font-size:11.5px;margin-top:6px}
+
+  /* ---- テーマ別進捗 ---- */
+  .themes{display:flex;flex-direction:column;gap:10px}
+  .trow{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;box-shadow:var(--shadow)}
+  .trow .r1{display:flex;align-items:center;gap:8px}
+  .trow .name{font-weight:700;font-size:13.5px}
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .st{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:auto;white-space:nowrap}
+  .st.planning{background:#eef2ff;color:#4f46e5}
+  .st.active{background:#e0f2fe;color:#0369a1}
+  .st.paused{background:#fef3c7;color:#b45309}
+  .st.completed{background:#dcfce7;color:#15803d}
+  .st.cancelled{background:#f1f5f9;color:#64748b}
+  .bar{height:6px;background:#eef1f5;border-radius:999px;margin:9px 0 7px;overflow:hidden}
+  .bar > i{display:block;height:100%;background:var(--tc,#1e5eb8);border-radius:999px}
+  .trow .meta{display:flex;gap:12px;color:var(--muted);font-size:11.5px;flex-wrap:wrap;align-items:center}
+  .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px}
+  .src.real{background:#dcfce7;color:#15803d}
+  .src.est{background:#f1f5f9;color:#64748b}
+  .src.human{background:#eef2ff;color:#4f46e5}
+  .trow .next{color:#334155;font-size:12px;margin-top:5px}
+
+  /* ---- ダッシュ入口 ---- */
+  .dash{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:6px}
+  @media(max-width:600px){.dash{grid-template-columns:repeat(2,1fr)}}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px;box-shadow:var(--shadow);transition:.15s;display:block}
+  .tile:hover{transform:translateY(-2px);border-color:var(--brand);box-shadow:0 6px 18px rgba(30,94,184,.12)}
+  .tile .ic{font-size:20px}
+  .tile .tt{font-weight:700;font-size:13px;margin-top:8px}
+  .tile .ts{color:var(--muted);font-size:11.5px;margin-top:2px}
+
+  .foot{color:var(--muted);font-size:11.5px;margin-top:34px;text-align:center;line-height:1.8}
+  .noresult{color:var(--muted);font-size:13px;padding:14px;text-align:center;display:none}
+  .skeleton{color:var(--muted);font-size:13px;padding:18px;text-align:center}
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;
+    padding:12px 14px;font-size:13px;margin-bottom:16px;display:none}
+
+  /* ---- ログイン ---- */
+  #gate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:#f9fafb;z-index:9999}
+  #gate form{background:#fff;padding:28px 24px;border-radius:14px;
+    box-shadow:0 8px 30px rgba(0,0,0,.12);width:330px;max-width:90vw}
+  #gate h3{font-size:19px;margin:0 0 4px}
+  #gate .g-sub{font-size:12px;color:#6b7280;margin-bottom:16px}
+  #gate input{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;
+    margin-bottom:10px;font-size:14px;font-family:inherit}
+  #gate button{width:100%;padding:11px;background:var(--brand);color:#fff;border:0;
+    border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit}
+  #gate .g-err{color:#dc2626;font-size:12px;margin-top:10px;min-height:16px}
+</style>
+
+<div id="gate">
+  <form id="gate-form">
+    <h3>技術開発ポータル</h3>
+    <div class="g-sub">CABINと同じ部署の共通アカウントでログインしてください</div>
+    <input id="g-email" type="email" placeholder="メールアドレス" autocomplete="username">
+    <input id="g-pass" type="password" placeholder="パスワード" autocomplete="current-password">
+    <button type="submit">ログイン</button>
+    <div class="g-err" id="g-err"></div>
+  </form>
+</div>
+
+<div class="wrap" id="app" hidden>
+
+  <div class="top">
+    <div class="logo">技</div>
+    <div>
+      <h1>技術開発ポータル</h1>
+      <div class="sub" id="asof">読み込み中…</div>
+    </div>
+    <div class="topbtns">
+      <button class="btn" id="reload">↻ 更新</button>
+      <a class="btn" href="./index.html">CABINへ</a>
+    </div>
+  </div>
+
+  <div class="err" id="err"></div>
+
+  <div class="searchbar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="q" placeholder="実験・テーマ・キーワードで探す（例：無電解、廃液、脱脂、Sn回収…）" autocomplete="off">
+    <div class="searchhint">新着日報とテーマ進捗をまとめて絞り込みます</div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+
+    <!-- 左：新着日報 -->
+    <section>
+      <h2>🧪 新着 実験日報 <span class="count" id="feedcount"></span>
+        <a class="seebtn" id="kintonelink" target="_blank" rel="noopener" hidden>kintoneで全部見る →</a></h2>
+      <div class="feed" id="feed"><div class="skeleton">読み込み中…</div></div>
+      <div class="noresult" id="nores">該当する日報がありません</div>
+    </section>
+
+    <!-- 右：テーマ別進捗 ＋ ダッシュ入口 -->
+    <div>
+      <section style="margin-bottom:24px">
+        <h2>📈 テーマ別 進捗 <span class="count" id="themecount"></span>
+          <span class="seebtn" id="toggleall">停滞テーマも表示</span></h2>
+        <div class="themes" id="themes"><div class="skeleton">読み込み中…</div></div>
+        <div class="noresult" id="nores2">該当するテーマがありません</div>
+      </section>
+
+      <section>
+        <h2>📊 ダッシュボード入口</h2>
+        <div class="dash" id="dash"></div>
+      </section>
+    </div>
+
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- 接続先（anonキーはCABIN本体と同じ公開キー。これ単体では何も読めずRLSで守られる） ----
+  var SUPABASE_URL = 'https://lcrwamtjljpwvmeujdxa.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxjcndhbXRqbGpwd3ZtZXVqZHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxMTU3NTcsImV4cCI6MjA4OTY5MTc1N30.EtssGU8Uk9IfiP5Jknf-ryVAGKifq5vcrqqdxOhF0MQ';
+  // supabase-js が使うセッション保存キー。CABIN本体と共有するのでログインは1回で済む。
+  var STORE_KEY = 'sb-' + SUPABASE_URL.replace('https://', '').split('.')[0] + '-auth-token';
+  var REFRESH_MS = 5 * 60 * 1000;   // 自動再読込
+  var STALE_DAYS = 45;              // これ超の未活動テーマは既定で畳む
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+
+  // ---------- セッション ----------
+  function readSession() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return null;
+      // supabase-js の新しめの版は "base64-" 接頭辞つきで保存することがある
+      if (raw.indexOf('base64-') === 0) raw = decodeURIComponent(escape(atob(raw.slice(7))));
+      var s = JSON.parse(raw);
+      return s && s.access_token ? s : null;
+    } catch (e) { return null; }
+  }
+  function writeSession(s) {
+    if (!s.expires_at && s.expires_in) s.expires_at = Math.floor(Date.now() / 1000) + s.expires_in;
+    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+  }
+  function expired(s) {
+    return !s.expires_at || (s.expires_at - 60) * 1000 < Date.now();
+  }
+  function tokenReq(grant, body) {
+    return fetch(SUPABASE_URL + '/auth/v1/token?grant_type=' + grant, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); });
+  }
+  // 有効なアクセストークンを返す（期限切れならリフレッシュ。CABIN側のセッションも延命される）
+  function ensureToken() {
+    var s = readSession();
+    if (!s) return Promise.resolve(null);
+    if (!expired(s)) return Promise.resolve(s.access_token);
+    if (!s.refresh_token) return Promise.resolve(null);
+    return tokenReq('refresh_token', { refresh_token: s.refresh_token }).then(function (j) {
+      if (!j.access_token) { localStorage.removeItem(STORE_KEY); return null; }
+      writeSession(j);
+      return j.access_token;
+    });
+  }
+
+  function showGate(msg) {
+    $('app').hidden = true;
+    $('gate').style.display = 'flex';
+    if (msg) $('g-err').textContent = msg;
+  }
+  $('gate-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = $('gate-form').querySelector('button');
+    btn.disabled = true; btn.textContent = '確認中...'; $('g-err').textContent = '';
+    tokenReq('password', { email: $('g-email').value.trim(), password: $('g-pass').value })
+      .then(function (j) {
+        if (!j.access_token) throw new Error('ng');
+        writeSession(j);
+        location.reload();
+      })
+      .catch(function () {
+        $('g-err').textContent = 'ログインに失敗しました（メール／パスワードをご確認ください）';
+        btn.disabled = false; btn.textContent = 'ログイン';
+      });
+  });
+
+  // ---------- データ取得 ----------
+  function loadStore(token) {
+    var keys = 'themes,kintone_feed,portal_links';
+    return fetch(SUPABASE_URL + '/rest/v1/rd_nexus_store?key=in.(' + keys + ')&select=key,value', {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token }
+    }).then(function (r) {
+      if (!r.ok) throw new Error('read ' + r.status);
+      return r.json();
+    }).then(function (rows) {
+      var m = {};
+      (rows || []).forEach(function (row) { m[row.key] = row.value; });
+      return m;
+    });
+  }
+
+  // ---------- 表示ヘルパ ----------
+  var STATUS_JA = { planning: '立上げ', active: '実験中', paused: '保留', completed: '完了', cancelled: '中止' };
+  // 名前で除外するもの（保存テスト／個人の寄せ集め枠はポータルのカードに出さない）
+  var HIDE = /^【.*テスト.*】|^その他/;
+  var PALETTE = ['#7c3aed','#0369a1','#dc2626','#0891b2','#65a30d','#ea580c','#4f46e5','#be185d','#0d9488','#b45309'];
+  function colorFor(name) {
+    var h = 0, s = String(name);
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+  function softOf(hex) { return hex + '1a'; } // 同系の薄い背景（8桁hex）
+  function daysSince(dateStr) {
+    if (!dateStr) return null;
+    var d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    return Math.round((Date.now() - d.getTime()) / 86400000);
+  }
+  function freshColor(days) {
+    if (days == null) return '#cbd5e1';
+    return days <= 14 ? '#22c55e' : days <= STALE_DAYS ? '#f97316' : '#ef4444';
+  }
+  function fmtDate(s) { return s ? String(s).slice(5).replace('-', '/') : ''; }
+
+  // ---------- 描画 ----------
+  var state = { themes: [], feed: null, links: [], showAll: false };
+
+  function renderKpis() {
+    var st = (state.feed && state.feed.stats) || {};
+    var wk = st.reports_7d, prev = st.reports_prev_7d;
+    var diff = (typeof wk === 'number' && typeof prev === 'number') ? wk - prev : null;
+    var diffTxt = diff == null ? '—' : (diff > 0 ? '先週比 +' + diff : diff < 0 ? '先週比 ' + diff : '先週から±0');
+    var diffCls = diff == null ? 'flat' : diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+
+    var cards = [
+      { n: st.themes_fresh != null ? st.themes_fresh : '—', l: '動いているテーマ', d: '直近14日に日報あり', c: 'flat' },
+      { n: wk != null ? wk : '—', l: '今週の実験日報', d: diffTxt, c: diffCls },
+      { n: st.themes_stale != null ? st.themes_stale : '—', l: '停滞テーマ', d: STALE_DAYS + '日以上 動きなし', c: st.themes_stale ? 'down' : 'flat' },
+      { n: state.themes.length, l: '登録テーマ', d: 'CABIN実験テーマ全体', c: 'flat' }
+    ];
+    $('kpis').innerHTML = cards.map(function (k) {
+      return '<div class="kpi"><div class="n">' + esc(k.n) + '</div>' +
+             '<div class="l">' + esc(k.l) + '</div>' +
+             '<div class="d ' + k.c + '">' + esc(k.d) + '</div></div>';
+    }).join('');
+  }
+
+  function renderFeed() {
+    var items = (state.feed && state.feed.items) || [];
+    $('feedcount') .textContent = items.length ? '（新しい順 ' + items.length + '件）' : '';
+    if (!items.length) {
+      $('feed').innerHTML = '<div class="skeleton">日報がまだ同期されていません（cabin-sync を実行してください）</div>';
+      return;
+    }
+    // kintoneへの入口はフィードのリンクから復元する（HTMLに社内URLを持たせないため）
+    var withUrl = items.filter(function (it) { return it.url; })[0];
+    if (withUrl) {
+      var a = $('kintonelink');
+      a.href = withUrl.url.split('#')[0];
+      a.hidden = false;
+    }
+    $('feed').innerHTML = items.map(function (it) {
+      var c = it.color || colorFor(it.theme);
+      var tag = 'style="--tc:' + c + ';--tcs:' + softOf(c) + '"';
+      var inner =
+        '<div class="r1"><span class="tag">' + esc(it.theme) + '</span>' +
+        '<span class="date">' + esc(fmtDate(it.date)) + '</span></div>' +
+        '<div class="ttl">' + esc(it.title || '(タイトルなし)') + '</div>' +
+        '<div class="sm">' + esc(it.summary) + '</div>' +
+        '<div class="who">' + esc(it.author) + (it.no ? ' ／ No.' + esc(it.no) : '') + '</div>';
+      return it.url
+        ? '<a class="card" ' + tag + ' href="' + esc(it.url) + '" target="_blank" rel="noopener">' + inner + '</a>'
+        : '<div class="card" ' + tag + '>' + inner + '</div>';
+    }).join('');
+  }
+
+  function renderThemes() {
+    var list = state.themes.filter(function (t) {
+      return t && t.name && !HIDE.test(t.name) && t.status !== 'cancelled';
+    });
+    // 直近に日報があるものを上へ。日報が無いテーマはその後ろ。
+    list.forEach(function (t) {
+      var k = t.kintone_sync || {};
+      t._days = daysSince(k.last_report_date);
+      t._sorted = t._days == null ? 99999 : t._days;
+    });
+    list.sort(function (a, b) { return a._sorted - b._sorted; });
+
+    var shown = state.showAll ? list : list.filter(function (t) {
+      return t._days != null && t._days <= STALE_DAYS;
+    });
+    // 同期がまだ一度も無いときは、畳むと空になるので全部出す
+    if (!shown.length) shown = list;
+
+    $('themecount').textContent = '（' + shown.length + ' / ' + list.length + '件）';
+    $('toggleall').textContent = state.showAll ? '動いているテーマだけ' : '停滞テーマも表示';
+
+    $('themes').innerHTML = shown.map(function (t) {
+      var k = t.kintone_sync || {};
+      var c = k.color || colorFor(t.name);   // 呼び名が違うテーマでも新着日報と同じ色にそろえる
+      var pg = Math.max(0, Math.min(100, Number(t.progress) || 0));
+      // 進捗%の出所を正直に出す：実測=kintoneの大目的進捗 / 推定=日報本数 / 人手=CABINの手入力を維持
+      var src = String(k.progress_source || '');
+      var srcKind = src.indexOf('推定') === 0 ? 'est' : src.indexOf('人手') === 0 ? 'human' : 'real';
+      var srcLabel = { est: '推定', human: '人手', real: '実測' }[srcKind];
+      var srcBadge = src
+        ? '<span class="src ' + srcKind + '" title="' + esc(k.progress_basis || '') + '">' + srcLabel + '</span>'
+        : '';
+      var meta = [];
+      if (k.last_report_date) meta.push('更新 ' + fmtDate(k.last_report_date));
+      if (k.report_count) meta.push('日報 ' + k.report_count + '本');
+      if (k.last_author) meta.push(esc(k.last_author));
+      return '<div class="trow" style="--tc:' + c + '" data-k="' + esc(t.name + ' ' + (t.tags || []).join(' ')) + '">' +
+        '<div class="r1">' +
+          '<span class="dot" style="background:' + freshColor(t._days) + '" title="最終活動からの日数"></span>' +
+          '<span class="name">' + esc(t.name) + '</span>' +
+          '<span class="st ' + esc(t.status || 'planning') + '">' + esc(STATUS_JA[t.status] || t.status || '—') + '</span>' +
+        '</div>' +
+        '<div class="bar"><i style="width:' + pg + '%"></i></div>' +
+        '<div class="meta"><span>' + pg + '%</span>' + srcBadge +
+          (meta.length ? '<span>' + meta.join('</span><span>') + '</span>' : '') + '</div>' +
+        (k.last_summary ? '<div class="next">最新：' + esc(k.last_summary) + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
+  function renderDash() {
+    var tiles = [];
+    var withUrl = ((state.feed && state.feed.items) || []).filter(function (it) { return it.url; })[0];
+    tiles.push({ ic: '🏠', tt: 'CABIN（本体）', ts: 'テーマ・タスク・日報', url: './index.html' });
+    if (withUrl) tiles.push({ ic: '🧪', tt: 'kintone 実験日報', ts: '入力の正本', url: withUrl.url.split('#')[0] });
+    // 追加リンクは rd_nexus_store の key='portal_links' から（社内URLをHTMLに焼かないため）
+    (state.links || []).forEach(function (l) {
+      tiles.push({ ic: l.icon || '📄', tt: l.title, ts: l.sub || '', url: l.url });
+    });
+    $('dash').innerHTML = tiles.map(function (t) {
+      var ext = /^https?:/.test(t.url) ? ' target="_blank" rel="noopener"' : '';
+      return '<a class="tile" href="' + esc(t.url) + '"' + ext + '>' +
+        '<div class="ic">' + t.ic + '</div>' +
+        '<div class="tt">' + esc(t.tt) + '</div>' +
+        '<div class="ts">' + esc(t.ts) + '</div></a>';
+    }).join('');
+    if (!state.links || !state.links.length) {
+      $('foot').innerHTML = 'リンクを増やすときは Supabase <code>rd_nexus_store</code> の ' +
+        '<code>portal_links</code> に <code>[{icon,title,sub,url}]</code> を入れてください' +
+        '（社内URLを公開HTMLに書かないための逃がし先です）。';
+    }
+  }
+
+  // 検索フィルタ
+  $('q').addEventListener('input', function () {
+    var t = $('q').value.trim().toLowerCase();
+    [['feed', '.card', 'nores'], ['themes', '.trow', 'nores2']].forEach(function (g) {
+      var items = document.querySelectorAll('#' + g[0] + ' ' + g[1]);
+      var shown = 0;
+      Array.prototype.forEach.call(items, function (el) {
+        var hay = ((el.dataset.k || '') + ' ' + el.textContent).toLowerCase();
+        var hit = !t || hay.indexOf(t) >= 0;
+        el.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      $(g[2]).style.display = shown ? 'none' : 'block';
+    });
+  });
+
+  $('toggleall').addEventListener('click', function () {
+    state.showAll = !state.showAll;
+    renderThemes();
+  });
+
+  // ---------- 起動 ----------
+  function refresh() {
+    var btn = $('reload');
+    btn.disabled = true;
+    return ensureToken().then(function (token) {
+      if (!token) { showGate(''); return; }
+      return loadStore(token).then(function (m) {
+        state.themes = Array.isArray(m.themes) ? m.themes : [];
+        // kintone_feed は {generated_at,stats,items} 形式。旧・配列形式も一応受ける。
+        var f = m.kintone_feed;
+        state.feed = Array.isArray(f) ? { items: f } : (f || null);
+        state.links = Array.isArray(m.portal_links) ? m.portal_links : [];
+
+        $('app').hidden = false;
+        $('gate').style.display = 'none';
+        $('err').style.display = 'none';
+
+        var gen = state.feed && state.feed.generated_at;
+        $('asof').textContent = '表面処理技術部 ／ ' +
+          (gen ? '最終同期 ' + new Date(gen).toLocaleString('ja-JP') : 'kintone未同期');
+
+        renderKpis(); renderFeed(); renderThemes(); renderDash();
+      });
+    }).catch(function (e) {
+      $('app').hidden = false;
+      $('err').style.display = 'block';
+      $('err').textContent = '読み込みに失敗しました（' + e.message + '）。時間をおいて「更新」を押してください。';
+    }).then(function () { btn.disabled = false; });
+  }
+
+  $('reload').addEventListener('click', refresh);
+  setInterval(refresh, REFRESH_MS);
+  refresh();
+})();
+</script>
