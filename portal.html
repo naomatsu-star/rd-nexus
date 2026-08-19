@@ -74,6 +74,7 @@
   .card .r1{display:flex;align-items:center;gap:8px;margin-bottom:3px}
   .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;
     color:var(--tc,#475569);background:var(--tcs,#f1f5f9)}
+  .srctag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;background:#e0f2fe;color:#0369a1}
   .card .date{color:var(--muted);font-size:11.5px;margin-left:auto}
   .card .ttl{font-weight:700;font-size:14px}
   .card .sm{color:#475569;font-size:12.5px;margin-top:2px}
@@ -170,7 +171,7 @@
 
     <!-- 左：新着日報 -->
     <section>
-      <h2>🧪 新着 実験日報 <span class="count" id="feedcount"></span>
+      <h2>🧪 新着の日報 <span class="count" id="feedcount"></span>
         <a class="seebtn" id="kintonelink" target="_blank" rel="noopener" hidden>kintoneで全部見る →</a></h2>
       <div class="feed" id="feed"><div class="skeleton">読み込み中…</div></div>
       <div class="noresult" id="nores">該当する日報がありません</div>
@@ -324,7 +325,7 @@
 
     var cards = [
       { n: st.themes_fresh != null ? st.themes_fresh : '—', l: '動いているテーマ', d: '直近14日に日報あり', c: 'flat' },
-      { n: wk != null ? wk : '—', l: '今週の実験日報', d: diffTxt, c: diffCls },
+      { n: wk != null ? wk : '—', l: '今週の日報', d: diffTxt, c: diffCls },
       { n: st.themes_stale != null ? st.themes_stale : '—', l: '停滞テーマ', d: STALE_DAYS + '日以上 動きなし', c: st.themes_stale ? 'down' : 'flat' },
       { n: state.themes.length, l: '登録テーマ', d: 'CABIN実験テーマ全体', c: 'flat' }
     ];
@@ -354,6 +355,9 @@
       var tag = 'style="--tc:' + c + ';--tcs:' + softOf(c) + '"';
       var inner =
         '<div class="r1"><span class="tag">' + esc(it.theme) + '</span>' +
+        // 2026-08-19: 日報アプリが2本になった。実験日報以外から来た行だけ出所を出す
+        (it.source && it.source !== 'exp' && it.source_label
+          ? '<span class="srctag">' + esc(it.source_label) + '</span>' : '') +
         '<span class="date">' + esc(fmtDate(it.date)) + '</span></div>' +
         '<div class="ttl">' + esc(it.title || '(タイトルなし)') + '</div>' +
         '<div class="sm">' + esc(it.summary) + '</div>' +
@@ -416,9 +420,16 @@
 
   function renderDash() {
     var tiles = [];
-    var withUrl = ((state.feed && state.feed.items) || []).filter(function (it) { return it.url; })[0];
     tiles.push({ ic: '🏠', tt: 'CABIN（本体）', ts: 'テーマ・タスク・日報', url: './index.html' });
-    if (withUrl) tiles.push({ ic: '🧪', tt: 'kintone 実験日報', ts: '入力の正本', url: withUrl.url.split('#')[0] });
+    // 日報アプリごとに入口タイルを出す(社内URLはHTMLに焼かず、フィードのリンクから復元する)
+    var seenApp = {};
+    ((state.feed && state.feed.items) || []).forEach(function (it) {
+      if (!it.url) return;
+      var base = it.url.split('#')[0];
+      if (seenApp[base]) return;
+      seenApp[base] = 1;
+      tiles.push({ ic: '🧪', tt: 'kintone ' + (it.source_label || '実験日報'), ts: '入力の正本', url: base });
+    });
     // 追加リンクは rd_nexus_store の key='portal_links' から（社内URLをHTMLに焼かないため）
     (state.links || []).forEach(function (l) {
       tiles.push({ ic: l.icon || '📄', tt: l.title, ts: l.sub || '', url: l.url });
